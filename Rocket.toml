@@ -1,0 +1,2 @@
+[default.databases]
+diesel_postgres_pool = { url = "postgres://admin:enzofernandes123@localhost/tdsdb" }
