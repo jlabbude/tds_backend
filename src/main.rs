@@ -2,19 +2,20 @@ mod cors;
 mod model;
 mod schema;
 
-use std::env;
 use crate::model::TDS;
 use crate::schema::tds_readings::dsl::tds_readings;
 use diesel::{Connection, PgConnection, RunQueryDsl};
+use dotenv::dotenv;
 use rand::random;
 use rocket::http::Status;
 use rocket::response::status::Custom;
+use rocket::serde::json::Json;
 use rocket::{get, routes};
 use rocket_sync_db_pools::{database, diesel};
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
 use serde::Deserialize;
+use std::env;
 use std::time::Duration;
-use dotenv::dotenv;
 
 #[database("diesel_postgres_pool")]
 pub struct Db(PgConnection);
@@ -24,7 +25,10 @@ struct IncomingMessage {
     tds_value: String,
 }
 
-async fn handle_message(message: String, db_pool: &mut PgConnection) -> Result<(), Box<dyn std::error::Error>> {
+async fn handle_message(
+    message: String,
+    db_pool: &mut PgConnection,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("Received raw message: \"{message}\"");
     let parsed_message: Result<IncomingMessage, serde_json::Error> = serde_json::from_str(&message);
 
@@ -70,6 +74,14 @@ async fn run_mqtt_client(db_pool: &mut PgConnection) {
     }
 }
 
+pub fn establish_connection() -> PgConnection {
+    dotenv().ok();
+
+    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    PgConnection::establish(&database_url)
+        .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
+}
+
 #[get("/last_message")]
 async fn fetch_last_message(db: Db) -> Result<String, Custom<String>> {
     db.run(|conn| tds_readings.load::<TDS>(conn))
@@ -89,12 +101,17 @@ async fn fetch_last_message(db: Db) -> Result<String, Custom<String>> {
         })
 }
 
-pub fn establish_connection() -> PgConnection {
-    dotenv().ok();
-
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    PgConnection::establish(&database_url)
-        .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
+#[get("/tds_history")]
+async fn fetch_tds_history(db: Db) -> Result<Json<Vec<TDS>>, Custom<String>> {
+    db.run(|conn| tds_readings.load::<TDS>(conn))
+        .await
+        .map(Json)
+        .map_err(|err| {
+            Custom(
+                Status::InternalServerError,
+                format!("Failed to load images: {:?}", err),
+            )
+        })
 }
 
 #[rocket::main]
@@ -106,9 +123,8 @@ async fn main() {
     rocket::build()
         .attach(Db::fairing())
         .attach(cors::CORS)
-        .mount("/", routes![fetch_last_message])
+        .mount("/", routes![fetch_last_message, fetch_tds_history])
         .launch()
         .await
         .expect("Failed to launch Rocket");
 }
-
