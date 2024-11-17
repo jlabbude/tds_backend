@@ -1,9 +1,11 @@
+#![allow(clippy::upper_case_acronyms)]
 mod cors;
 mod model;
 mod schema;
 
 use crate::model::TDS;
 use crate::schema::tds_readings::dsl::tds_readings;
+use diesel::query_dsl::methods::{LimitDsl, OrderDsl};
 use diesel::{Connection, PgConnection, RunQueryDsl};
 use dotenv::dotenv;
 use rand::random;
@@ -13,6 +15,7 @@ use rocket::serde::json::Json;
 use rocket::{get, routes};
 use rocket_sync_db_pools::{database, diesel};
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
+use schema::tds_readings::timestamp;
 use serde::Deserialize;
 use std::env;
 use std::time::Duration;
@@ -83,35 +86,44 @@ pub fn establish_connection() -> PgConnection {
 }
 
 #[get("/last_message")]
-async fn fetch_last_message(db: Db) -> Result<String, Custom<String>> {
+async fn fetch_last_message(db: Db) -> Result<Json<TDS>, Custom<String>> {
     db.run(|conn| tds_readings.load::<TDS>(conn))
         .await
         .map(|messages| {
             if let Some(last_message) = messages.last() {
-                format!("{{\"tds_value\": \"{}\"}}", last_message.tds_ppm)
+                Json(TDS {
+                    id: last_message.id,
+                    tds_ppm: last_message.tds_ppm,
+                    timestamp: last_message.timestamp,
+                })
             } else {
-                String::from("{\"tds_value\": \"0\"}")
+                todo!()
             }
         })
         .map_err(|err| {
             Custom(
                 Status::InternalServerError,
-                format!("Failed to load images: {:?}", err),
+                format!("Failed to fetch message: {:?}", err),
             )
         })
 }
 
 #[get("/tds_history")]
 async fn fetch_tds_history(db: Db) -> Result<Json<Vec<TDS>>, Custom<String>> {
-    db.run(|conn| tds_readings.load::<TDS>(conn))
-        .await
-        .map(Json)
-        .map_err(|err| {
-            Custom(
-                Status::InternalServerError,
-                format!("Failed to load images: {:?}", err),
-            )
-        })
+    db.run(|conn| {
+        tds_readings
+            .order(timestamp)
+            .limit(60)
+            .load::<TDS>(conn)
+    })
+    .await
+    .map(Json)
+    .map_err(|err| {
+        Custom(
+            Status::InternalServerError,
+            format!("Failed to fetch history: {:?}", err),
+        )
+    })
 }
 
 #[rocket::main]
