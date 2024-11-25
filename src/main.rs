@@ -55,9 +55,9 @@ async fn handle_message(
 }
 
 async fn run_mqtt_client(db_pool: &mut PgConnection) {
-    let mut mqttoptions = MqttOptions::new("rocket_mqtt", "localhost", 1883);
+    let mut mqttoptions = MqttOptions::new("rocket_mqtt", "192.168.221.100", 1883);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
-    mqttoptions.set_credentials("tdsusr", "tdspass");
+    mqttoptions.set_credentials("kofre", "milofre90");
 
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
 
@@ -90,22 +90,25 @@ async fn fetch_last_message(db: Db) -> Result<Json<TDS>, Custom<String>> {
     db.run(|conn| tds_readings.load::<TDS>(conn))
         .await
         .map(|messages| {
-            if let Some(last_message) = messages.last() {
+            Ok(if let Some(last_message) = messages.last() {
                 Json(TDS {
                     id: last_message.id,
                     tds_ppm: last_message.tds_ppm,
                     timestamp: last_message.timestamp,
                 })
             } else {
-                todo!()
-            }
+                return Err(Custom(
+                    Status::InternalServerError,
+                    format!("Failed to fetch message"),
+                ));
+            })
         })
         .map_err(|err| {
             Custom(
                 Status::InternalServerError,
                 format!("Failed to fetch message: {:?}", err),
             )
-        })
+        })?
 }
 
 #[get("/tds_history")]
