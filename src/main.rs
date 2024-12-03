@@ -6,7 +6,7 @@ mod schema;
 use crate::model::TDS;
 use crate::schema::tds_readings::dsl::tds_readings;
 use diesel::query_dsl::methods::{LimitDsl, OrderDsl};
-use diesel::{Connection, PgConnection, RunQueryDsl};
+use diesel::{Connection, ExpressionMethods, PgConnection, RunQueryDsl};
 use dotenv::dotenv;
 use rand::random;
 use rocket::http::Status;
@@ -55,9 +55,9 @@ async fn handle_message(
 }
 
 async fn run_mqtt_client(db_pool: &mut PgConnection) {
-    let mut mqttoptions = MqttOptions::new("rocket_mqtt", "192.168.221.100", 1883);
+    let mut mqttoptions = MqttOptions::new("rocket_mqtt", "localhost", 1883);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
-    mqttoptions.set_credentials("kofre", "milofre90");
+    mqttoptions.set_credentials("tdsusr", "tdspass");
 
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
 
@@ -115,7 +115,7 @@ async fn fetch_last_message(db: Db) -> Result<Json<TDS>, Custom<String>> {
 async fn fetch_tds_history(db: Db) -> Result<Json<Vec<TDS>>, Custom<String>> {
     db.run(|conn| {
         tds_readings
-            .order(timestamp)
+            .order(timestamp.desc())
             .limit(60)
             .load::<TDS>(conn)
     })
